@@ -18,7 +18,24 @@ def decision_step(Rover):
     
     if Rover.nav_angles is not None:
         # Check for Rover.mode status
-        if Rover.mode == 'forward': 
+        if Rover.mode == 'forward':
+            # Check for gold spotted in the vicinity and potentially go search it out
+            dx_list = []
+            dy_list = []
+            for dx in range(-5,5):
+                for dy in range(-5,5):
+                    if (Rover.searchmap[int(Rover.pos[1]+dy),int(Rover.pos[0]+dx),0] > 0) & \
+                       (Rover.searchmap[int(Rover.pos[1]+dy),int(Rover.pos[0]+dx),2] == 0):
+                        print('Gold spotted at dx {} dy {}'.format(dx,dy))
+                        dx_list.append(dx)
+                        dy_list.append(dy)
+            dx = np.mean(dx_list)
+            dy = np.mean(dy_list)
+            if abs(dx) > 0 or abs(dy) > 0:
+                print('gold mean dx {} dy {} pos[0] {} pos[1] {}'.format(dx,dy,Rover.pos[0],Rover.pos[1]))
+                Rover.mission_pos = [Rover.pos[0]+dx, Rover.pos[1]+dy]
+                Rover.change_mode('mission')
+            
             # Check the extent of navigable terrain
             if len(Rover.nav_angles) >= Rover.stop_forward:  
                 # If mode is forward, navigable terrain looks good 
@@ -33,25 +50,13 @@ def decision_step(Rover):
                 else: # Else coast
                     Rover.throttle = 0
                 Rover.brake = 0
-                if Rover.state == 'looking':
-                    # Set steering to average angle clipped to the range +/- 15
-                    Rover.steer = np.clip(np.mean(Rover.nav_angles * 180/np.pi), -15, 15)
-
-                    
-                    Rover.state = 'following'
-
-                    
-                else:
-                    # Find an angle directed toward the obstacle on the right side
-
-                    # NEED better statistics than outlier min to compute rightward bias
-
-                    angles = Rover.nav_angles * 180.0/np.pi
-                    mean_angle = np.mean(angles)
-                    right_angles = np.select([angles<mean_angle],[angles])
-                    mean_angle = np.mean(right_angles)
-                    print("mean angle {} steer {}".format(np.mean(angles),mean_angle))
-                    Rover.steer = np.clip(mean_angle, -15, 15)
+                # Find an angle directed toward the obstacle on the right side
+                angles = Rover.nav_angles * 180.0/np.pi
+                mean_angle = np.mean(angles)
+                right_angles = np.select([angles<mean_angle],[angles])
+                mean_angle = np.mean(right_angles)
+                print("mean angle {} steer {}".format(np.mean(angles),mean_angle))
+                Rover.steer = np.clip(mean_angle, -15, 15)
             # If there's a lack of navigable terrain pixels then go to 'stop' mode
             elif len(Rover.nav_angles) < Rover.stop_forward:
                     # Set mode to "stop" and hit the brakes!
@@ -61,6 +66,83 @@ def decision_step(Rover):
                     Rover.steer = 0
                     Rover.change_mode('stop')
 
+        elif Rover.mode == 'mission':            
+            # turn in the direction of target location
+            y = Rover.mission_pos[1] - Rover.pos[1]
+            x = Rover.mission_pos[0] - Rover.pos[0]
+            if abs(y) <= 2 and abs(x) <= 2:
+                # arrival at target zone
+                print('Arrival at mission target zone!')
+                # survey the area and mark the searchmap
+                
+                for dx in range(-2,3):
+                    for dy in range(-2,3):
+                        Rover.searchmap[int(Rover.pos[1]+dy),int(Rover.pos[0]+dx),2] = 1  # searched
+                
+                Rover.throttle = 0
+                Rover.brake = Rover.brake_set
+                Rover.steer = 0
+                Rover.mission_pos = None
+                Rover.change_mode('forward')
+            else:
+                theta = np.arctan2([y],[x])[0]
+                target_rad = theta - (Rover.yaw * np.pi / 180.0)
+                if target_rad >= (2*np.pi):
+                    target_rad -= (2*np.pi)
+                elif target_rad <= (-2*np.pi):
+                    target_rad += (2*np.pi)
+                print('Mission pos {} yaw {} theta {} target rad {}'.format \
+                      (Rover.mission_pos,Rover.yaw,theta,target_rad))
+                if abs(target_rad * 180.0/np.pi) > 15.0:
+                    Rover.target_rad = target_rad
+                    Rover.change_mode('rotate')
+                else:
+                    if len(Rover.nav_angles) < Rover.stop_forward:
+                        if Rover.vel > 0.2:
+                            Rover.throttle = 0
+                            Rover.brake = Rover.brake_set
+                            Rover.steer = 0
+                        else:
+                            Rover.throttle = 0
+                            Rover.brake = 0
+                            Rover.steer = 15 if target_rad >= 0 else -15
+                            
+                            # FIXME this can oscillate and become stuck
+                            
+                    else:
+                        if Rover.vel < Rover.max_vel:
+                            if Rover.progress == False:
+                                print('Throttle {} Velocity {} no progress condition'.format(Rover.throttle,Rover.vel))
+                                Rover.change_mode('escape')
+                            else:
+                                Rover.throttle = Rover.throttle_set
+                        else:
+                            Rover.throttle = 0
+                            Rover.brake = 0
+                            # find the closest unobstructed angle                    
+                            delta_rad = Rover.nav_angles - target_rad
+                            best_rad = min(delta_rad,key=abs)
+                            best_rad += target_rad
+                            print('Target rad {} best rad {}'.format(target_rad,best_rad))
+
+                            Rover.steer = np.clip((180.0 / np.pi) * best_rad, -15, 15)
+
+        elif Rover.mode == 'rotate':
+            print('Rotate yaw {} target_rad {} pulse_on {}'.format(Rover.yaw,Rover.target_rad,Rover.pulse_on))
+            Rover.throttle = 0
+            steer_rad = Rover.target_rad - (Rover.yaw * np.pi / 180.0)
+            if steer_rad < 0.1 * np.pi:                
+                Rover.change_mode('mission')
+            else:
+                if Rover.pulse_on:
+                    Rover.brake = 0
+                    Rover.steer = 15 if steer_rad >= 0 else -15
+                else:
+                    Rover.brake = brake_set
+                    Rover.steer = 0
+            Rover.pulse_on = not Rover.pulse_on
+            
+                    
         elif Rover.mode == 'escape':
             # turn to try to find somewhere to go
             Rover.throttle = 0
@@ -71,11 +153,18 @@ def decision_step(Rover):
                 delta_yaw = abs(Rover.yaw - Rover.yaw_q)  # delta yaw since change of mode
                 if delta_yaw <= 15 or len(Rover.nav_angles) < Rover.go_forward:
                     Rover.brake = 0
-                    Rover.steer = 15  # turn in the direction we want to follow the cliff wall
+                    angle_sign = 1  # follow cliff wall default
+                    if Rover.mission_pos is not None:
+                        y = Rover.mission_pos[1] - Rover.pos[1]
+                        x = Rover.mission_pos[0] - Rover.pos[0]
+                        theta = np.arctan2([y],[x])[0]
+                        angle = theta - Rover.yaw
+                        angle_sign = 1 if angle >= 0 else -1                        
+                    Rover.steer = 15 if angle_sign == 1 else -15
                 else:
                     Rover.brake = 0
                     Rover.throttle = Rover.throttle_set
-                    Rover.mode = 'forward'
+                    Rover.mode = 'forward' if Rover.mission_pos == None else 'mission'
             
         # If we're already in "stop" mode then make different decisions
         elif Rover.mode == 'stop':

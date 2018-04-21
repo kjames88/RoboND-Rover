@@ -98,12 +98,13 @@ def perception_step(Rover):
     # TODO: 
     # NOTE: camera image is coming to you in Rover.img
     # 1) Define source and destination points for perspective transform
-    offset = 6
+    voffset = 5
+    hoffset = 5
     source = np.float32([[120,96],[200,96],[14,140],[300,140]])
-    destination = np.float32([[Rover.img.shape[1]/2-5, Rover.img.shape[0]-offset-10],
-                              [Rover.img.shape[1]/2+5, Rover.img.shape[0]-offset-10],
-                              [Rover.img.shape[1]/2-5, Rover.img.shape[0]-offset],
-                              [Rover.img.shape[1]/2+5, Rover.img.shape[0]-offset]])
+    destination = np.float32([[Rover.img.shape[1]/2-hoffset-5, Rover.img.shape[0]-voffset-10],
+                              [Rover.img.shape[1]/2-hoffset+5, Rover.img.shape[0]-voffset-10],
+                              [Rover.img.shape[1]/2-hoffset-5, Rover.img.shape[0]-voffset],
+                              [Rover.img.shape[1]/2-hoffset+5, Rover.img.shape[0]-voffset]])
     # 2) Apply perspective transform
     warped = perspect_transform(Rover.img, source, destination)
 
@@ -114,14 +115,11 @@ def perception_step(Rover):
     # 3) Apply color threshold to identify navigable terrain/obstacles/rock samples
     # scale of warped image has changed such that about 30x30 pixels represent the visible
     # range in front of rover:  dont' try to use the full 160x320 on the 200x200 world map
-    #nav_threshed = color_thresh(warped[125:154,140:175,:])
-    #obstacle_threshed = np.zeros_like(nav_threshed)
-    #obstacle_threshed[nav_threshed == 0] = 1
-    kernel = np.ones((3,3),np.uint8)
-    warped_eroded = cv2.erode(warped,kernel,iterations=1)
+    #kernel = np.ones((3,3),np.uint8)
+    #warped_eroded = cv2.erode(warped,kernel,iterations=1)
     
-    nav_threshed = color_thresh(warped_eroded)
-    obstacle_threshed = obstacle_thresh(warped_eroded)
+    nav_threshed = color_thresh(warped)
+    obstacle_threshed = obstacle_thresh(warped)
     rock_threshed = gold_thresh(warped)
     # 4) Update Rover.vision_image (this will be displayed on left side of screen)
         # Example: Rover.vision_image[:,:,0] = obstacle color-thresholded binary image
@@ -139,8 +137,8 @@ def perception_step(Rover):
         # Example: Rover.worldmap[obstacle_y_world, obstacle_x_world, 0] += 1
         #          Rover.worldmap[rock_y_world, rock_x_world, 1] += 1
         #          Rover.worldmap[navigable_y_world, navigable_x_world, 2] += 1
-    xpos = Rover.pos[1]
-    ypos = Rover.pos[0]
+    xpos = Rover.pos[0]
+    ypos = Rover.pos[1]
     yaw = Rover.yaw
 
     print("Rover xpos {} ypos {} yaw {}".format(int(xpos),int(ypos),Rover.yaw))
@@ -155,17 +153,22 @@ def perception_step(Rover):
         #xpix,ypix = rover_coords(obstacle_threshed[135:,140:170])
         xpix,ypix = rover_coords(obstacle_threshed[125:,:])
         xpix_world,ypix_world = pix_to_world(xpix,ypix,xpos,ypos,yaw,200,10)
-        Rover.worldmap[xpix_world,ypix_world,0] += 1
+        Rover.worldmap[ypix_world,xpix_world,0] += 1
     
-        xpix,ypix = rover_coords(rock_threshed)
+        xpix,ypix = rover_coords(rock_threshed[125:,130:180])
         xpix_world,ypix_world = pix_to_world(xpix,ypix,xpos,ypos,yaw,200,10)
-        Rover.worldmap[xpix_world,ypix_world,1] = 128
+        Rover.worldmap[ypix_world,xpix_world,1] = 128
+        Rover.searchmap[ypix_world,xpix_world,0] = 1  # mark for searching (gold)
+
+        if len(ypix_world) > 0:
+            print('marked gold in {} pixels'.format(len(ypix_world)))
 
         xpix,ypix = rover_coords(nav_threshed[125:,130:180])
-        #xpix,ypix = rover_coords(nav_threshed)
+        #xpix,ypix = rover_coords(nav_threshed[125:,:])
         xpix_world,ypix_world = pix_to_world(xpix,ypix,xpos,ypos,yaw,200,10)
-        Rover.worldmap[xpix_world,ypix_world,2] = 128
-        Rover.worldmap[xpix_world,ypix_world,0] = 0  # TEST
+        Rover.worldmap[ypix_world,xpix_world,2] = 128
+        Rover.searchmap[ypix_world,xpix_world,1] = 1  # mark for searching (navigable area)
+        #Rover.worldmap[ypix_world,xpix_world,0] = 0  # TEST
 
     xpix,ypix = rover_coords(nav_threshed)
 

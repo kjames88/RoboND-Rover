@@ -32,7 +32,7 @@ def update_rover(Rover, data):
       print(data.keys())
       # The current speed of the rover in m/s
       Rover.vel = convert_to_float(data["speed"])
-      if Rover.mode == 'forward':
+      if Rover.mode == 'forward' or Rover.mode == 'mission':
             # check for progress
             priming = False
             if Rover.pos_q == None:
@@ -63,6 +63,8 @@ def update_rover(Rover, data):
             Rover.time_q = time_now
       # The current position of the rover
       Rover.pos = [convert_to_float(pos.strip()) for pos in data["position"].split(';')]
+      # Mark the grid point searched
+      Rover.searchmap[int(Rover.pos[0]),int(Rover.pos[1]),2] = 1      
       # The current yaw angle of the rover
       Rover.yaw = convert_to_float(data["yaw"])
       # The current yaw angle of the rover

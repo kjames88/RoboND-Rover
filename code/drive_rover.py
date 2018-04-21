@@ -77,17 +77,21 @@ class RoverState():
         self.near_sample = 0 # Will be set to telemetry value data["near_sample"]
         self.picking_up = 0 # Will be set to telemetry value data["picking_up"]
         self.send_pickup = False # Set to True to trigger rock pickup
-        self.state = 'looking' # looking or following (canyon wall)
         self.pos_q = None # previous position for progress detection
         self.yaw_q = None # previous yaw for change in yaw detection
         self.time_q = None
         self.progress = False
+        self.searchmap = np.zeros((200,200,3), dtype=np.int)  # [0] gold spotted [1] navigable [2] searched
+        self.mission_pos = None
+        self.pulse_on = False
+        self.target_rad = 0.0
     def change_mode(self,new_mode):
         if new_mode != self.mode:
             self.time_q = time.time()
             self.pos_q = self.pos
             self.yaw_q = self.yaw
             self.progress = True
+            self.pulse_on = True
         self.mode = new_mode
         
 # Initialize our rover 
