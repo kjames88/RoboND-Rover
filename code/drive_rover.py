@@ -83,15 +83,17 @@ class RoverState():
         self.progress = False
         self.searchmap = np.zeros((200,200,3), dtype=np.int)  # [0] gold spotted [1] navigable [2] searched
         self.mission_pos = None
-        self.pulse_on = False
+        self.pulse_on = 0
         self.target_rad = 0.0
+        self.stuck_count = 0
     def change_mode(self,new_mode):
         if new_mode != self.mode:
             self.time_q = time.time()
             self.pos_q = self.pos
             self.yaw_q = self.yaw
             self.progress = True
-            self.pulse_on = True
+            self.pulse_on = 1
+            self.stuck_count = 0
         self.mode = new_mode
         
 # Initialize our rover 
