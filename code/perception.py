@@ -98,6 +98,8 @@ def perception_step(Rover):
     # TODO: 
     # NOTE: camera image is coming to you in Rover.img
     # 1) Define source and destination points for perspective transform
+    
+    # 0.5m offset on each axis
     voffset = 5
     hoffset = 5
     source = np.float32([[120,96],[200,96],[14,140],[300,140]])
@@ -141,7 +143,7 @@ def perception_step(Rover):
     ypos = Rover.pos[1]
     yaw = Rover.yaw
 
-    print("Rover xpos {} ypos {} yaw {}".format(int(xpos),int(ypos),Rover.yaw))
+    print("Rover xpos {} ypos {} yaw {}".format(xpos,ypos,Rover.yaw))
 
     pitch = Rover.pitch
     if pitch > 358.0:
@@ -160,9 +162,6 @@ def perception_step(Rover):
         Rover.worldmap[ypix_world,xpix_world,1] = 128
         Rover.searchmap[ypix_world,xpix_world,0] = 1  # mark for searching (gold)
 
-        if len(ypix_world) > 0:
-            print('marked gold in {} pixels'.format(len(ypix_world)))
-
         xpix,ypix = rover_coords(nav_threshed[125:,130:180])
         #xpix,ypix = rover_coords(nav_threshed[125:,:])
         xpix_world,ypix_world = pix_to_world(xpix,ypix,xpos,ypos,yaw,200,10)
@@ -180,5 +179,27 @@ def perception_step(Rover):
     Rover.nav_dists = dists
     Rover.nav_angles = angles
     
+    # Hi resolution gold close-range map
+    voffset = 10
+    destination = np.float32([[Rover.img.shape[1]/2-50,Rover.img.shape[0]-voffset-100], \
+                              [Rover.img.shape[1]/2+50,Rover.img.shape[0]-voffset-100], \
+                              [Rover.img.shape[1]/2-50,Rover.img.shape[0]-voffset], \
+                              [Rover.img.shape[1]/2+50,Rover.img.shape[0]-voffset]])
+    warped = perspect_transform(Rover.img, source, destination)
+    rock_threshed = gold_thresh(warped)
+    xpix,ypix = rover_coords(rock_threshed[110:,:])
+    if len(xpix) >= 5:
+        xpix_world,ypix_world = pix_to_world(xpix,ypix,xpos,ypos,yaw,200,100)
+        # compute rough x,y center of the rock
+        xmin = min(xpix_world)
+        xmax = max(xpix_world)
+        ymin = min(ypix_world)
+        ymax = max(ypix_world)
+        x = xmin + ((xmax-xmin) / 2)
+        y = ymin + ((ymax-ymin) / 2)
+        Rover.hires_gold_pos = [x,y]
+        print('Detected hires gold at {}'.format(Rover.hires_gold_pos))
+    else:
+        Rover.hires_gold_pos = None
     
     return Rover

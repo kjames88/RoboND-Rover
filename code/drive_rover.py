@@ -80,21 +80,37 @@ class RoverState():
         self.pos_q = None # previous position for progress detection
         self.yaw_q = None # previous yaw for change in yaw detection
         self.time_q = None
-        self.progress = False
+        self.progress = True
         self.searchmap = np.zeros((200,200,3), dtype=np.int)  # [0] gold spotted [1] navigable [2] searched
         self.mission_pos = None
         self.pulse_on = 0
         self.target_rad = 0.0
         self.stuck_count = 0
+        self.hires_gold_pos = None
+        self.xy_pos = None
+        self.prior_mode = []
     def change_mode(self,new_mode):
-        if new_mode != self.mode:
-            self.time_q = time.time()
-            self.pos_q = self.pos
-            self.yaw_q = self.yaw
-            self.progress = True
-            self.pulse_on = 1
-            self.stuck_count = 0
+        print('change_mode {} -> {}'.format(self.mode,new_mode))
+        if new_mode == self.mode:  # error
+            return
+        self.time_q = time.time()
+        self.pos_q = self.pos
+        self.yaw_q = self.yaw
+        self.progress = True
+        self.pulse_on = 1
+        self.stuck_count = 0
         self.mode = new_mode
+        
+    def sub_call(self,new_mode):
+        print('sub_call {} -> {}'.format(self.mode,new_mode))
+        if new_mode == self.mode:  # error
+            return
+        self.prior_mode.append(self.mode)
+        self.change_mode(new_mode)
+
+    def sub_return(self):
+        print('sub_return from {}'.format(self.mode))
+        self.change_mode(self.prior_mode.pop())
         
 # Initialize our rover 
 Rover = RoverState()
