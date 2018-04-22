@@ -18,7 +18,7 @@ def color_thresh(img, rgb_thresh=(160, 160, 160)):
     # Return the binary image
     return color_select
 
-def obstacle_thresh(img, rgb_thresh=(160, 160, 160)):
+def obstacle_thresh(img, rgb_thresh=(110, 110, 110)):
     color_select = np.zeros_like(img[:,:,0])
     # TODO:  add above black to remove out of scope region
     below_thresh = (img[:,:,0] <= rgb_thresh[0]) | (img[:,:,1] <= rgb_thresh[1]) | (img[:,:,2] <= rgb_thresh[2])
@@ -152,22 +152,24 @@ def perception_step(Rover):
     if roll > 358.0:
         roll -= 360.0
     if abs(pitch) < 2.0 and abs(roll) < 2.0:     
-        #xpix,ypix = rover_coords(obstacle_threshed[135:,140:170])
-        xpix,ypix = rover_coords(obstacle_threshed[125:,:])
+        xpix,ypix = rover_coords(obstacle_threshed[125:,110:200])
         xpix_world,ypix_world = pix_to_world(xpix,ypix,xpos,ypos,yaw,200,10)
         Rover.worldmap[ypix_world,xpix_world,0] += 1
     
         xpix,ypix = rover_coords(rock_threshed[125:,130:180])
         xpix_world,ypix_world = pix_to_world(xpix,ypix,xpos,ypos,yaw,200,10)
-        Rover.worldmap[ypix_world,xpix_world,1] = 128
-        Rover.searchmap[ypix_world,xpix_world,0] = 1  # mark for searching (gold)
+        Rover.worldmap[ypix_world,xpix_world,1] += 1
 
+        for i in range(200):
+            for j in range(200):
+                if Rover.worldmap[i,j,1] >= Rover.gold_thresh:
+                    Rover.searchmap[i,j,0] = 1  # mark for searching (gold)
+                
+            
         xpix,ypix = rover_coords(nav_threshed[125:,130:180])
-        #xpix,ypix = rover_coords(nav_threshed[125:,:])
         xpix_world,ypix_world = pix_to_world(xpix,ypix,xpos,ypos,yaw,200,10)
-        Rover.worldmap[ypix_world,xpix_world,2] = 128
+        Rover.worldmap[ypix_world,xpix_world,2] += 1
         Rover.searchmap[ypix_world,xpix_world,1] = 1  # mark for searching (navigable area)
-        #Rover.worldmap[ypix_world,xpix_world,0] = 0  # TEST
 
     xpix,ypix = rover_coords(nav_threshed)
 

@@ -89,6 +89,7 @@ class RoverState():
         self.hires_gold_pos = None
         self.xy_pos = None
         self.prior_mode = []
+        self.gold_thresh = 4
     def change_mode(self,new_mode):
         print('change_mode {} -> {}'.format(self.mode,new_mode))
         if new_mode == self.mode:  # error

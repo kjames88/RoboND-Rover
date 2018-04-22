@@ -32,7 +32,7 @@ def update_rover(Rover, data):
       print(data.keys())
       # The current speed of the rover in m/s
       Rover.vel = convert_to_float(data["speed"])
-      if Rover.mode == 'forward' or Rover.mode == 'mission':
+      if Rover.mode == 'forward' or Rover.mode == 'mission' or Rover.mode == 'move_xy':
             # check for progress
             priming = False
             if Rover.pos_q == None:
