@@ -191,6 +191,9 @@ def perception_step(Rover):
     rock_threshed = gold_thresh(warped)
     xpix,ypix = rover_coords(rock_threshed[110:,:])
     if len(xpix) >= 5:
+        dists,angles = to_polar_coords(xpix,ypix)
+        Rover.hires_gold_polar = [np.mean(angles * 180.0/np.pi),np.mean(dists)]
+        
         xpix_world,ypix_world = pix_to_world(xpix,ypix,xpos,ypos,yaw,200,100)
         # compute rough x,y center of the rock
         xmin = min(xpix_world)
@@ -200,7 +203,8 @@ def perception_step(Rover):
         x = xmin + ((xmax-xmin) / 2)
         y = ymin + ((ymax-ymin) / 2)
         Rover.hires_gold_pos = [x,y]
-        print('Detected hires gold at {}'.format(Rover.hires_gold_pos))
+        print('Detected hires gold at world pos {} rover polar {}'. \
+              format(Rover.hires_gold_pos,Rover.hires_gold_polar))
     else:
         Rover.hires_gold_pos = None
     

@@ -87,9 +87,12 @@ class RoverState():
         self.target_rad = 0.0
         self.stuck_count = 0
         self.hires_gold_pos = None
+        self.hires_gold_polar = None
         self.xy_pos = None
         self.prior_mode = []
         self.gold_thresh = 4
+        self.nav_thresh = 32
+        self.obstacle_ratio = 3
     def change_mode(self,new_mode):
         print('change_mode {} -> {}'.format(self.mode,new_mode))
         if new_mode == self.mode:  # error

@@ -32,6 +32,17 @@ def max_gold_pos(Rover,check_searched):
     else:
         return None
 
+def navigable_neighbor(Rover):
+    for dx in range(-1,2):
+        for dy in range(-1,2):
+            new_y = int(Rover.pos[1] + dy)
+            new_x = int(Rover.pos[0] + dx)
+            if new_y >= 0 and new_y < 200 and new_x >= 0 and new_x < 200:
+                if Rover.worldmap[new_y,new_x,2] >= Rover.nav_thresh and \
+                   Rover.worldmap[new_y,new_x,0] < (Rover.obstacle_ratio * Rover.worldmap[new_y,new_x,2]):
+                    return [new_x,new_y]
+    return None
+    
 # [x,y]
 delta = [[-1,0],[0,-1],[1,0],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]]
 
@@ -63,8 +74,8 @@ def route(Rover,start_pos,end_pos):
                 print('cell x={} y={} closed {} obstacle {} nav {}'.format(new_x,new_y,closed[new_y,new_x], \
                                                                            Rover.worldmap[new_y,new_x,0], \
                                                                            Rover.worldmap[new_y,new_x,2]))
-                if closed[new_y,new_x] == 0 and Rover.worldmap[new_y,new_x,2] >= 64 and \
-                   Rover.worldmap[new_y,new_x,0] < (3 * Rover.worldmap[new_y,new_x,2]):
+                if closed[new_y,new_x] == 0 and Rover.worldmap[new_y,new_x,2] >= Rover.nav_thresh and \
+                   Rover.worldmap[new_y,new_x,0] < (Rover.obstacle_ratio * Rover.worldmap[new_y,new_x,2]):
                     new_cost = c + 1
                     queue.append([new_cost,new_x,new_y])
                     closed[new_y,new_x] = 1
@@ -240,52 +251,60 @@ def decision_step(Rover):
             if next_x < 200 and next_y < 200:
                 step_pos = [next_x,next_y]
             else:
-                step_pos = Rover.xy_pos
+                #step_pos = navigable_neighbor(Rover)  # move from current position to retry routing
+                step_pos = None
 
-            x = step_pos[0] - Rover.pos[0]
-            y = step_pos[1] - Rover.pos[1]
-            rem_dist = np.sqrt(x**2 + y**2)
-            print('move_xy step_pos {} x {} y {} rem_dist {}'.format(step_pos,x,y,rem_dist))
-            if abs(x) <= 0.25 and abs(y) <= 0.25:
-                Rover.sub_return()
-            else:
-                # rotate to face in worldmap direction of x,y or xy
-                theta = np.arctan2([y],[x])[0]
-                steer_rad = normalize(theta - (Rover.yaw * np.pi / 180.0))
-                print('move_xy theta {} steer_rad {}'.format(theta,steer_rad))
-                steer_deg = steer_rad * 180.0/np.pi
-                if abs(steer_deg) > 20.0:
-                    Rover.target_rad = theta
-                    Rover.sub_call('rotate')
+            if step_pos is not None:
+                x = step_pos[0] - Rover.pos[0]
+                y = step_pos[1] - Rover.pos[1]
+                rem_dist = np.sqrt(x**2 + y**2)
+                print('move_xy step_pos {} x {} y {} rem_dist {}'.format(step_pos,x,y,rem_dist))
+                if abs(x) <= 0.25 and abs(y) <= 0.25:
+                    Rover.sub_return()
                 else:
-                    dx = np.cos(theta)
-                    dy = np.sin(theta)
-                    fwd_x = int(Rover.pos[0] + dx)
-                    fwd_y = int(Rover.pos[1] + dy)
-                    if Rover.progress == True:
-                        if rem_dist >= 2.0:
-                            if Rover.vel < Rover.max_vel:
-                                Rover.throttle = Rover.throttle_set
-                                Rover.brake = 0
-                            else:
-                                Rover.throttle = 0
-                                Rover.brake = 0
-                        else:
-                            if Rover.vel > 0.75:
-                                Rover.brake = Rover.brake_set
-                                Rover.throttle = 0
-                            else:
-                                Rover.throttle = Rover.throttle_set/2.0
-                                Rover.brake = 0
-                        Rover.steer = steer_deg
+                    # rotate to face in worldmap direction of x,y or xy
+                    theta = np.arctan2([y],[x])[0]
+                    steer_rad = normalize(theta - (Rover.yaw * np.pi / 180.0))
+                    print('move_xy theta {} steer_rad {}'.format(theta,steer_rad))
+                    steer_deg = steer_rad * 180.0/np.pi
+                    if abs(steer_deg) > 20.0:
+                        Rover.target_rad = theta
+                        Rover.sub_call('rotate')
                     else:
-                        Rover.sub_call('escape')
+                        if Rover.progress == True:
+                            if rem_dist >= 2.0:
+                                if Rover.vel < Rover.max_vel:
+                                    Rover.throttle = Rover.throttle_set
+                                    Rover.brake = 0
+                                else:
+                                    Rover.throttle = 0
+                                    Rover.brake = 0
+                            else:
+                                if Rover.vel > 0.75:
+                                    Rover.brake = Rover.brake_set
+                                    Rover.throttle = 0
+                                else:
+                                    Rover.throttle = Rover.throttle_set/2.0
+                                    Rover.brake = 0
+                                    Rover.steer = steer_deg
+                        else:
+                            if Rover.stuck_count > 50:
+                                print('is the current cell navigable / obstacle:  {} {}'. \
+                                      format(Rover.worldmap[int(Rover.pos[1]),int(Rover.pos[0]),2], \
+                                             Rover.worldmap[int(Rover.pos[1]),int(Rover.pos[0]),0]))
+                                Rover.sub_return()  # failed
+                            else:
+                                # increase obstacle preference due to inability to proceed
+                                dx = np.cos(theta)
+                                dy = np.sin(theta)
+                                fwd_x = int(Rover.pos[0] + dx)
+                                fwd_y = int(Rover.pos[1] + dy)
+                                Rover.worldmap[int(Rover.pos[1]+fwd_y),int(Rover.pos[0]+fwd_x),2] = 0
+                                Rover.sub_call('escape')
                     Rover.stuck_count += 1
-                    if Rover.stuck_count > 50:
-                        print('is the current cell navigable / obstacle:  {} {}'. \
-                              format(Rover.worldmap[int(Rover.pos[1]),int(Rover.pos[0]),2], \
-                                     Rover.worldmap[int(Rover.pos[1]),int(Rover.pos[0]),0]))
-                        Rover.sub_return()  # failed
+            else:
+                # need to mark access from current grid cell to target as blocked
+                Rover.sub_return()  # failure
                 
         elif Rover.mode == 'escape':
             # turn to try to find somewhere to go
@@ -352,10 +371,10 @@ def decision_step(Rover):
                         print('Abort collection due to no gold in range')
                         Rover.change_mode('forward')    
                 else:
-                    Rover.throttle = 0
-                    Rover.brake = Rover.brake_set
-                    Rover.steer = 0
                     if Rover.near_sample == True:
+                        Rover.throttle = 0
+                        Rover.brake = Rover.brake_set
+                        Rover.steer = 0
                         print('Near the sample, pick it up!')
                         # mark this region searched so we don't try to find gold here again
                         for dx in range(-5,6):
@@ -366,12 +385,19 @@ def decision_step(Rover):
                         Rover.send_pickup = True
                         Rover.change_mode('forward')
                     else:
-                        print('Use the hires gold location')
-                        #dx = Rover.hires_gold_pos[0] / 100.0  # 100 pix/m
-                        #dy = Rover.hires_gold_pos[1] / 100.0
-                        #Rover.xy_pos = [Rover.pos[0]+(dx/2.0),Rover.pos[1]+(dy/2.0)]
+                        print('Use the hires gold location pos {} rover polar {}'. \
+                              format(Rover.hires_gold_pos,Rover.hires_gold_polar))
                         Rover.xy_pos = Rover.hires_gold_pos
-                        Rover.sub_call('move_xy')
+                        if np.sqrt((Rover.xy_pos[0]-Rover.pos[0])**2 + (Rover.xy_pos[1]-Rover.pos[1])**2) >= 1.0:
+                            Rover.brake = Rover.brake_set
+                            Rover.throttle = 0
+                            Rover.steer = 0
+                            Rover.sub_call('move_xy')
+                        else:
+                            # nudge toward goal
+                            Rover.throttle = 0.1
+                            Rover.brake = 0
+                            Rover.steer = np.clip(Rover.hires_gold_polar[0],-15,15)
             
         # If we're already in "stop" mode then make different decisions
         elif Rover.mode == 'stop':
