@@ -32,6 +32,17 @@ def max_gold_pos(Rover,check_searched):
     else:
         return None
 
+def any_gold_nearby(Rover):
+    for dx in range(-10,10):
+        for dy in range(-10,10):
+            new_y = int(Rover.pos[1] + dy)
+            new_x = int(Rover.pos[0] + dx)
+            if new_y >= 0 and new_y < 200 and new_x >= 0 and new_x < 200:
+                v = Rover.worldmap[new_y,new_x,1]
+                if v > 0:
+                    return True
+    return False
+    
 def navigable_neighbor(Rover):
     for dx in range(-1,2):
         for dy in range(-1,2):
@@ -45,6 +56,14 @@ def navigable_neighbor(Rover):
     
 # [x,y]
 delta = [[-1,0],[0,-1],[1,0],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]]
+
+def get_routing_dir(offset):
+    try:
+        v = delta.index(offset)
+        return v
+    except ValueError:
+        print('ValueError in get_routing_dir({})'.format(offset))
+        return -1
 
 def route(Rover,start_pos,end_pos):
     # use the worldmap to find a path
@@ -129,6 +148,12 @@ def decision_step(Rover):
                 print('Gold pos {}'.format(gold_pos))
                 Rover.mission_pos = gold_pos
                 Rover.change_mode('mission')
+            #elif any_gold_nearby(Rover):
+            #    # try to boost the gold spotted so it triggers the mission above next time
+            #    Rover.brake = Rover.brake_set
+            #    Rover.throttle = 0
+            #    Rover.steer = 0
+            #    Rover.sub_call('survey')
             else:
                 # Check the extent of navigable terrain
                 if len(Rover.nav_angles) >= Rover.stop_forward:  
@@ -155,6 +180,18 @@ def decision_step(Rover):
                     Rover.steer = 0
                     Rover.change_mode('stop')
 
+        elif Rover.mode == 'survey':
+            Rover.throttle = 0
+            if Rover.vel > 0.2:
+                Rover.brake = Rover.brake_set
+                Rover.steer = 0
+            else:
+                Rover.brake = 0
+                Rover.steer = 15
+            Rover.stuck_count += 1
+            if Rover.stuck_count > 50:
+                Rover.sub_return()
+            
         elif Rover.mode == 'mission':            
             Rover.prior_mode = []
             # turn in the direction of target location
@@ -199,7 +236,7 @@ def decision_step(Rover):
                     fwd_y = int(Rover.pos[1] + dy)
                     if fwd_y >= 0 and fwd_y < Rover.worldmap.shape[0] and \
                        fwd_x >= 0 and fwd_x < Rover.worldmap.shape[1] and \
-                       Rover.worldmap[fwd_y,fwd_x,2] >= 64 and \
+                       Rover.worldmap[fwd_y,fwd_x,2] >= Rover.nav_thresh and \
                        Rover.progress == True:
                         if Rover.vel < Rover.max_vel:
                             Rover.throttle = Rover.throttle_set
@@ -210,8 +247,20 @@ def decision_step(Rover):
                             Rover.steer = np.clip((180.0 / np.pi) * steer_rad, -15, 15)                        
                     else:
                         # route around obstacle
-                        Rover.xy_pos = Rover.mission_pos
-                        Rover.sub_call('move_xy')
+                        if Rover.xy_pos == Rover.mission_pos and Rover.xy_result == 'abort':
+                            # already tried move_xy:  throw it in gear to move the rover and then abort mission
+                            Rover.throttle = -0.2
+                            Rover.brake = 0
+                            Rover.steer = -15
+                            # need to mark access from current grid cell to target as blocked
+                            d = get_routing_dir([dx,dy])
+                            if d >= 0:
+                                Rover.navigation_dir_blocked[int(Rover.pos[1]),int(Rover.pos[0]),d] = 1
+                            print('Abort mission due to move_xy failure')
+                            Rover.change_mode('forward')  # abort the mission
+                        else:
+                            Rover.xy_pos = Rover.mission_pos
+                            Rover.sub_call('move_xy')
 
         elif Rover.mode == 'rotate':
             Rover.throttle = 0
@@ -260,6 +309,7 @@ def decision_step(Rover):
                 rem_dist = np.sqrt(x**2 + y**2)
                 print('move_xy step_pos {} x {} y {} rem_dist {}'.format(step_pos,x,y,rem_dist))
                 if abs(x) <= 0.25 and abs(y) <= 0.25:
+                    Rover.xy_result = 'target_loc'
                     Rover.sub_return()
                 else:
                     # rotate to face in worldmap direction of x,y or xy
@@ -292,6 +342,7 @@ def decision_step(Rover):
                                 print('is the current cell navigable / obstacle:  {} {}'. \
                                       format(Rover.worldmap[int(Rover.pos[1]),int(Rover.pos[0]),2], \
                                              Rover.worldmap[int(Rover.pos[1]),int(Rover.pos[0]),0]))
+                                Rover.xy_result = 'abort'
                                 Rover.sub_return()  # failed
                             else:
                                 # increase obstacle preference due to inability to proceed
@@ -303,7 +354,7 @@ def decision_step(Rover):
                                 Rover.sub_call('escape')
                     Rover.stuck_count += 1
             else:
-                # need to mark access from current grid cell to target as blocked
+                Rover.xy_result = 'abort'
                 Rover.sub_return()  # failure
                 
         elif Rover.mode == 'escape':
@@ -348,7 +399,8 @@ def decision_step(Rover):
                     # bump the position of rover a little and re-assess
                     gold_pos = max_gold_pos(Rover,False)
                     if gold_pos is not None:
-                        if np.sqrt((Rover.pos[0]-gold_pos[0])**2 + (Rover.pos[1]-gold_pos[1])**2) >= 1.0:
+                        if np.sqrt((Rover.pos[0]-gold_pos[0])**2 + (Rover.pos[1]-gold_pos[1])**2) >= 1.0 and \
+                           (Rover.xy_pos != gold_pos or Rover.xy_result != 'abort'):
                             print('Need to move rover near gold pos {}'.format(gold_pos))
                             Rover.xy_pos = gold_pos
                             Rover.sub_call('move_xy')
@@ -385,10 +437,15 @@ def decision_step(Rover):
                         Rover.send_pickup = True
                         Rover.change_mode('forward')
                     else:
+                        Rover.stuck_count += 1
+                        if Rover.stuck_count > 100:
+                            Rover.sub_call('escape')
                         print('Use the hires gold location pos {} rover polar {}'. \
                               format(Rover.hires_gold_pos,Rover.hires_gold_polar))
                         Rover.xy_pos = Rover.hires_gold_pos
-                        if np.sqrt((Rover.xy_pos[0]-Rover.pos[0])**2 + (Rover.xy_pos[1]-Rover.pos[1])**2) >= 1.0:
+                        # move_xy only works when grid cells do not match; also don't use for < 1m distance
+                        if int(Rover.xy_pos[0]) != int(Rover.pos[0]) and int(Rover.xy_pos[1]) != int(Rover.pos[1]) \
+                           and np.sqrt((Rover.xy_pos[0]-Rover.pos[0])**2 + (Rover.xy_pos[1]-Rover.pos[1])**2) >= 1.0:
                             Rover.brake = Rover.brake_set
                             Rover.throttle = 0
                             Rover.steer = 0

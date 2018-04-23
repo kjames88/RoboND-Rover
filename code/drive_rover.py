@@ -82,6 +82,7 @@ class RoverState():
         self.time_q = None
         self.progress = True
         self.searchmap = np.zeros((200,200,3), dtype=np.int)  # [0] gold spotted [1] navigable [2] searched
+        self.navigation_dir_blocked = np.zeros((200,200,8), dtype=np.int)  # routing directions 0=clear 1=blocked
         self.mission_pos = None
         self.pulse_on = 0
         self.target_rad = 0.0
@@ -89,8 +90,9 @@ class RoverState():
         self.hires_gold_pos = None
         self.hires_gold_polar = None
         self.xy_pos = None
+        self.xy_result = 'None'
         self.prior_mode = []
-        self.gold_thresh = 4
+        self.gold_thresh = 2
         self.nav_thresh = 32
         self.obstacle_ratio = 3
     def change_mode(self,new_mode):
