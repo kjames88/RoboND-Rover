@@ -77,7 +77,7 @@ def get_routing_dir(deg):
     else:
         return 2  # right [1,0]
 
-# Simple pre-A* router
+# Simple pre-A* router based on the Udacity AI for Robotics lectures
 def route(Rover,start_pos,end_pos):
     # use the worldmap to find a path
     print('Route from {} to {}'.format(start_pos,end_pos))
