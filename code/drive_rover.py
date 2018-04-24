@@ -91,10 +91,13 @@ class RoverState():
         self.hires_gold_polar = None
         self.xy_pos = None
         self.xy_result = 'None'
+        self.target_pos_q = None
         self.prior_mode = []
-        self.gold_thresh = 2
-        self.nav_thresh = 32
+        self.gold_thresh = 3
+        self.nav_thresh = 16
         self.obstacle_ratio = 3
+        self.forward_yaw = 0
+        self.transition = 'None'
     def change_mode(self,new_mode):
         print('change_mode {} -> {}'.format(self.mode,new_mode))
         if new_mode == self.mode:  # error
@@ -106,6 +109,7 @@ class RoverState():
         self.pulse_on = 1
         self.stuck_count = 0
         self.mode = new_mode
+        self.transition = 'jump'
         
     def sub_call(self,new_mode):
         print('sub_call {} -> {}'.format(self.mode,new_mode))
@@ -113,10 +117,12 @@ class RoverState():
             return
         self.prior_mode.append(self.mode)
         self.change_mode(new_mode)
+        self.transition = 'sub_call'
 
     def sub_return(self):
         print('sub_return from {}'.format(self.mode))
         self.change_mode(self.prior_mode.pop())
+        self.transition = 'sub_return'
         
 # Initialize our rover 
 Rover = RoverState()

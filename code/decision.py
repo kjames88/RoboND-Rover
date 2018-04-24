@@ -57,14 +57,27 @@ def navigable_neighbor(Rover):
 # [x,y]
 delta = [[-1,0],[0,-1],[1,0],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]]
 
-def get_routing_dir(offset):
-    try:
-        v = delta.index(offset)
-        return v
-    except ValueError:
-        print('ValueError in get_routing_dir({})'.format(offset))
-        return -1
+def get_routing_dir(deg):
+    if deg <= 22.5:
+        return 2  # right [1,0]
+    elif deg <= 67.5:
+        return 7  # up right [1,1]
+    elif deg <= 112.5:
+        return 3  # up [0,1]
+    elif deg <= 157.5:
+        return 5  # up left [-1,1]
+    elif deg <= 202.5:
+        return 0  # left [-1,0]
+    elif deg <= 247.5:
+        return 4  # down left [-1,-1]
+    elif deg <= 292.5:
+        return 1  # down [0,-1]
+    elif deg <= 337.5:
+        return 6  # down right [1,-1]
+    else:
+        return 2  # right [1,0]
 
+# Simple pre-A* router
 def route(Rover,start_pos,end_pos):
     # use the worldmap to find a path
     print('Route from {} to {}'.format(start_pos,end_pos))
@@ -73,7 +86,7 @@ def route(Rover,start_pos,end_pos):
     queue = []
     closed = np.zeros_like(Rover.worldmap[:,:,0],dtype=np.int32)
     rx_action = np.zeros_like(Rover.worldmap[:,:,0],dtype=np.int32)
-    queue.append([0,start_pos[0],start_pos[1]]) # [cost, x, y]
+    queue.append([0.0,start_pos[0],start_pos[1]]) # [cost, x, y]
     goal_reached = False
     while len(queue) > 0:
         queue.sort(key=lambda v: v[0])
@@ -93,12 +106,15 @@ def route(Rover,start_pos,end_pos):
                 print('cell x={} y={} closed {} obstacle {} nav {}'.format(new_x,new_y,closed[new_y,new_x], \
                                                                            Rover.worldmap[new_y,new_x,0], \
                                                                            Rover.worldmap[new_y,new_x,2]))
-                if closed[new_y,new_x] == 0 and Rover.worldmap[new_y,new_x,2] >= Rover.nav_thresh and \
-                   Rover.worldmap[new_y,new_x,0] < (Rover.obstacle_ratio * Rover.worldmap[new_y,new_x,2]):
-                    new_cost = c + 1
-                    queue.append([new_cost,new_x,new_y])
-                    closed[new_y,new_x] = 1
-                    rx_action[new_y,new_x] = i
+                nav = Rover.worldmap[new_y,new_x,2]
+                obst = Rover.worldmap[new_y,new_x,0]
+                if closed[new_y,new_x] == 0 and nav >= Rover.nav_thresh: #and obst < (Rover.obstacle_ratio * nav):
+                    if Rover.navigation_dir_blocked[y,x,i] == 0:
+                        cdir = obst/nav # nav > 0 enforced above
+                        new_cost = c + cdir
+                        queue.append([new_cost,new_x,new_y])
+                        closed[new_y,new_x] = 1
+                        rx_action[new_y,new_x] = i
     if goal_reached == False:
         return 200,200
     # follow the action back to start
@@ -139,7 +155,9 @@ def decision_step(Rover):
     if Rover.nav_angles is not None:
         # Check for Rover.mode status
         if Rover.mode == 'forward':
+            Rover.transition = 'None'  # any operation on transition should be placed ahead of this
             Rover.prior_mode = []
+            Rover.forward_yaw = Rover.yaw
             # Check for gold spotted in the vicinity and potentially go search it out
             dx_list = []
             dy_list = []
@@ -180,7 +198,18 @@ def decision_step(Rover):
                     Rover.steer = 0
                     Rover.change_mode('stop')
 
+        elif Rover.mode == 'resume_forward':
+            # jump starts the 2-step operation: rotate
+            # sub_return triggers the 2nd step: return to forward
+            if Rover.transition == 'jump':
+                # rotate back to forward yaw then continue exploring
+                Rover.target_rad = Rover.forward_yaw * np.pi/180.0
+                Rover.sub_call('rotate')
+            else:
+                Rover.change_mode('forward')            
+            
         elif Rover.mode == 'survey':
+            Rover.transition = 'None'  # any operation on transition should be placed ahead of this
             Rover.throttle = 0
             if Rover.vel > 0.2:
                 Rover.brake = Rover.brake_set
@@ -192,11 +221,19 @@ def decision_step(Rover):
             if Rover.stuck_count > 50:
                 Rover.sub_return()
             
-        elif Rover.mode == 'mission':            
+        elif Rover.mode == 'mission':
+            abort_mission = False
+            if Rover.transition == 'sub_return':
+                if Rover.xy_result == 'abort':
+                    abort_mission = True
+            Rover.transition = 'None'  # any operation on transition should be placed ahead of this
             Rover.prior_mode = []
+            Rover.xy_result = 'None'
+
             # turn in the direction of target location
             y = Rover.mission_pos[1] - Rover.pos[1]
             x = Rover.mission_pos[0] - Rover.pos[0]
+            theta = np.arctan2([y],[x])[0]
             if Rover.hires_gold_pos is not None or (abs(y) <= 0.25 and abs(x) <= 0.25):
                 # arrival at target zone
                 print('ARRIVAL at mission target zone!  Rover near sample {}'.format(Rover.near_sample))
@@ -220,49 +257,45 @@ def decision_step(Rover):
                 Rover.mission_pos = None
                 # try to pick up the rock
                 Rover.change_mode('collect')
+            elif abort_mission == True:
+                # already tried move_xy:  throw it in gear to move the rover and then abort mission
+                Rover.throttle = -0.2
+                Rover.brake = 0
+                Rover.steer = -15
+                print('Abort mission due to move_xy failure')
+                Rover.change_mode('resume_forward')  # abort the mission
             else:
-                theta = np.arctan2([y],[x])[0]
                 steer_rad = normalize(theta - (Rover.yaw * np.pi / 180.0))
                 print('Mission pos {} yaw {} theta {} target steer_rad {}'.format \
                       (Rover.mission_pos,Rover.yaw,theta,steer_rad))
-                if abs(steer_rad * 180.0/np.pi) > 20.0:
+                if abs(steer_rad * 180.0/np.pi) > 30.0:
                     Rover.target_rad = theta
                     Rover.sub_call('rotate')
                 else:
                     # Use obstacle information explicitly instead of simple nav_angles count
-                    dx = np.cos(theta)
-                    dy = np.sin(theta)
-                    fwd_x = int(Rover.pos[0] + dx)
-                    fwd_y = int(Rover.pos[1] + dy)
-                    if fwd_y >= 0 and fwd_y < Rover.worldmap.shape[0] and \
-                       fwd_x >= 0 and fwd_x < Rover.worldmap.shape[1] and \
-                       Rover.worldmap[fwd_y,fwd_x,2] >= Rover.nav_thresh and \
-                       Rover.progress == True:
-                        if Rover.vel < Rover.max_vel:
-                            Rover.throttle = Rover.throttle_set
+                    if Rover.progress == True:
+                        if np.sqrt(x**2 + y**2) < 2.0:  # approaching target: slow down
+                            if Rover.vel > 0.75:
+                                Rover.brake = Rover.brake_set
+                                Rover.throttle = 0
+                            else:
+                                Rover.brake = 0
+                                Rover.throttle = Rover.throttle_set/2
                         else:
-                            Rover.throttle = 0
+                            if Rover.vel < Rover.max_vel:
+                                Rover.throttle = Rover.throttle_set
+                            else:
+                                Rover.throttle = 0
                             Rover.brake = 0
-                            print('Target steer_rad {}'.format(steer_rad))
-                            Rover.steer = np.clip((180.0 / np.pi) * steer_rad, -15, 15)                        
+                        print('Target steer_rad {}'.format(steer_rad))
+                        Rover.steer = np.clip((180.0 / np.pi) * steer_rad, -15, 15)                        
                     else:
                         # route around obstacle
-                        if Rover.xy_pos == Rover.mission_pos and Rover.xy_result == 'abort':
-                            # already tried move_xy:  throw it in gear to move the rover and then abort mission
-                            Rover.throttle = -0.2
-                            Rover.brake = 0
-                            Rover.steer = -15
-                            # need to mark access from current grid cell to target as blocked
-                            d = get_routing_dir([dx,dy])
-                            if d >= 0:
-                                Rover.navigation_dir_blocked[int(Rover.pos[1]),int(Rover.pos[0]),d] = 1
-                            print('Abort mission due to move_xy failure')
-                            Rover.change_mode('forward')  # abort the mission
-                        else:
-                            Rover.xy_pos = Rover.mission_pos
-                            Rover.sub_call('move_xy')
+                        Rover.xy_pos = Rover.mission_pos
+                        Rover.sub_call('move_xy')
 
         elif Rover.mode == 'rotate':
+            Rover.transition = 'None'  # any operation on transition should be placed ahead of this
             Rover.throttle = 0
             print('Rotate yaw {} target yaw {} pulse_on {}'. \
                   format(Rover.yaw,(180.0/np.pi) * Rover.target_rad,Rover.pulse_on))
@@ -293,22 +326,30 @@ def decision_step(Rover):
                 Rover.stuck_count = 0
             
         elif Rover.mode == 'move_xy':
+            if Rover.transition == 'sub_call':
+                Rover.escape_attempts = 0
+            Rover.transition = 'None'  # any operation on transition should be placed ahead of this
             start_pos = [int(Rover.pos[0]),int(Rover.pos[1])]
             end_pos = [int(Rover.xy_pos[0]),int(Rover.xy_pos[1])]
             next_x, next_y = route(Rover,start_pos,end_pos)
             print('ROUTE next x={} y={}'.format(next_x,next_y))
             if next_x < 200 and next_y < 200:
-                step_pos = [next_x,next_y]
+                step_pos = [int(next_x),int(next_y)]
             else:
                 #step_pos = navigable_neighbor(Rover)  # move from current position to retry routing
                 step_pos = None
 
             if step_pos is not None:
-                x = step_pos[0] - Rover.pos[0]
-                y = step_pos[1] - Rover.pos[1]
-                rem_dist = np.sqrt(x**2 + y**2)
+                if Rover.target_pos_q is not None:
+                    if Rover.target_pos_q[0] == int(Rover.pos[0]) and Rover.target_pos_q[0] == int(Rover.pos[1]):
+                        Router.escape_attempts = 0
+                Rover.target_pos_q = step_pos
+                x = step_pos[0] - int(Rover.pos[0])
+                y = step_pos[1] - int(Rover.pos[1])
+                rem_dist = np.sqrt((Rover.xy_pos[0]-Rover.pos[0])**2 + (Rover.xy_pos[1]-Rover.pos[1])**2)
                 print('move_xy step_pos {} x {} y {} rem_dist {}'.format(step_pos,x,y,rem_dist))
-                if abs(x) <= 0.25 and abs(y) <= 0.25:
+                # xy operates on grid cells so check integer position for completion
+                if int(Rover.xy_pos[0]) == int(Rover.pos[0]) and int(Rover.xy_pos[1]) == int(Rover.pos[1]):
                     Rover.xy_result = 'target_loc'
                     Rover.sub_return()
                 else:
@@ -317,7 +358,7 @@ def decision_step(Rover):
                     steer_rad = normalize(theta - (Rover.yaw * np.pi / 180.0))
                     print('move_xy theta {} steer_rad {}'.format(theta,steer_rad))
                     steer_deg = steer_rad * 180.0/np.pi
-                    if abs(steer_deg) > 20.0:
+                    if abs(steer_deg) > 30.0:
                         Rover.target_rad = theta
                         Rover.sub_call('rotate')
                     else:
@@ -338,26 +379,25 @@ def decision_step(Rover):
                                     Rover.brake = 0
                                     Rover.steer = steer_deg
                         else:
-                            if Rover.stuck_count > 50:
-                                print('is the current cell navigable / obstacle:  {} {}'. \
-                                      format(Rover.worldmap[int(Rover.pos[1]),int(Rover.pos[0]),2], \
-                                             Rover.worldmap[int(Rover.pos[1]),int(Rover.pos[0]),0]))
+                            if Rover.escape_attempts > 1:
+                                d = get_routing_dir(theta * 180.0/np.pi)  # 0-2pi range
+                                print('block routing dir {} from pos {}'.format(d,Rover.pos))
+                                Rover.navigation_dir_blocked[int(Rover.pos[1]),int(Rover.pos[0]),d] = 1
                                 Rover.xy_result = 'abort'
                                 Rover.sub_return()  # failed
                             else:
-                                # increase obstacle preference due to inability to proceed
-                                dx = np.cos(theta)
-                                dy = np.sin(theta)
-                                fwd_x = int(Rover.pos[0] + dx)
-                                fwd_y = int(Rover.pos[1] + dy)
-                                Rover.worldmap[int(Rover.pos[1]+fwd_y),int(Rover.pos[0]+fwd_x),2] = 0
+                                Rover.escape_attempts += 1
                                 Rover.sub_call('escape')
                     Rover.stuck_count += 1
             else:
-                Rover.xy_result = 'abort'
+                if start_pos == end_pos:
+                    Rover.xy_result = 'target_loc'
+                else:
+                    Rover.xy_result = 'abort'
                 Rover.sub_return()  # failure
                 
         elif Rover.mode == 'escape':
+            Rover.transition = 'None'  # any operation on transition should be placed ahead of this
             # turn to try to find somewhere to go
             Rover.stuck_count += 1
             if Rover.vel > 0.2:
@@ -388,6 +428,7 @@ def decision_step(Rover):
         elif Rover.mode == 'collect':
             # Attempt to collect sample
             # Rover should be within about 1m of sample on each axis
+            Rover.transition = 'None'  # any operation on transition should be placed ahead of this
             Rover.prior_mode = []
             print('Collect attempt: pos {} hires_gold_pos {} vel {}'.format(Rover.pos,Rover.hires_gold_pos,Rover.vel))
             if Rover.vel > 0.1:
@@ -400,7 +441,7 @@ def decision_step(Rover):
                     gold_pos = max_gold_pos(Rover,False)
                     if gold_pos is not None:
                         if np.sqrt((Rover.pos[0]-gold_pos[0])**2 + (Rover.pos[1]-gold_pos[1])**2) >= 1.0 and \
-                           (Rover.xy_pos != gold_pos or Rover.xy_result != 'abort'):
+                           Rover.xy_pos != gold_pos:
                             print('Need to move rover near gold pos {}'.format(gold_pos))
                             Rover.xy_pos = gold_pos
                             Rover.sub_call('move_xy')
@@ -418,10 +459,10 @@ def decision_step(Rover):
                                 Rover.steer = -15
                                 if Rover.stuck_count > 1000:
                                     print('Abort due to no gold spotted')
-                                    Rover.change_mode('forward')  # mission failure
+                                    Rover.change_mode('resume_forward')  # mission failure
                     else:
                         print('Abort collection due to no gold in range')
-                        Rover.change_mode('forward')    
+                        Rover.change_mode('resume_forward')    
                 else:
                     if Rover.near_sample == True:
                         Rover.throttle = 0
@@ -435,7 +476,7 @@ def decision_step(Rover):
                                    Rover.pos[0]+dx >= 0 and Rover.pos[0]+dx < Rover.worldmap.shape[1]:
                                     Rover.searchmap[int(Rover.pos[1]+dy),int(Rover.pos[0]+dx),2] = 1
                         Rover.send_pickup = True
-                        Rover.change_mode('forward')
+                        Rover.change_mode('resume_forward')
                     else:
                         Rover.stuck_count += 1
                         if Rover.stuck_count > 100:
@@ -458,6 +499,8 @@ def decision_step(Rover):
             
         # If we're already in "stop" mode then make different decisions
         elif Rover.mode == 'stop':
+            Rover.transition = 'None'  # any operation on transition should be placed ahead of this
+            Rover.prior_mode = []
             # If we're in stop mode but still moving keep braking
             if Rover.vel > 0.2:
                 Rover.throttle = 0
@@ -484,6 +527,7 @@ def decision_step(Rover):
     # Just to make the rover do something 
     # even if no modifications have been made to the code
     else:
+        Rover.transition = 'None'  # any operation on transition should be placed ahead of this
         Rover.throttle = Rover.throttle_set
         Rover.steer = 0
         Rover.brake = 0
