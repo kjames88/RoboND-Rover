@@ -6,7 +6,7 @@
 
 Code is added to the Color Thresholding section for obstacle and rock detection.  Obstacles are detected using below threshold of [110,110,110] to create a guardband between navigable and obstacle.  Rocks are detected with R > 100, G > 100, B < 80 based on empirical results.
 
-process_image() is updated to incorporate the perspective transform source and destination points, warping, color thresholding and coordinate transforms from the notebook.  The worldmap is built like the example but with fixed values of 128, which behaved best in the notebook at the time of the writeup.  The output is quite different from the simulator output.
+*process_image()* is updated to incorporate the perspective transform source and destination points, warping, color thresholding and coordinate transforms from the notebook.  The worldmap is built like the example but with fixed values of 128, which behaved best in the notebook at the time of the writeup.  The output is quite different from the simulator output.
 
 
 ## Autonomous Navigation and Mapping
